@@ -7,4 +7,4 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 DeepBook = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/deepbook", rev = "framework/testnet" }
 
 [addresses]
-dacade_deepbook = "0x0"
+bank = "0x0"
