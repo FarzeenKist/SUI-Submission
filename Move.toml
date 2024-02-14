@@ -1,5 +1,5 @@
 [package]
-name = "dacade_deepbook"
+name = "bank_move"
 version = "0.0.1"
 
 [dependencies]
