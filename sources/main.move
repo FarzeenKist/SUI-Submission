@@ -9,25 +9,29 @@ module bank::bank {
     use sui::clock::{Self, Clock};
     use std::string::{Self, String};
     use std::vector;
-    use std::option::{Option, none, some, borrow, contains};
-
+    use std::option::{Option, none, some};
 
     /// For when someone tries to interact with account specific functions without an account
     const ENoAccount: u64 = 0;
     // For when the balance of an amount is less than the amount specified
     const EInsufficientBalance: u64 = 1;
+    // For when an index would result in out of bounds error
+    const EOutOfBounds: u64 = 2;
+    /// For when someone tries to create more than one account in the same bank
+    const EAccountExists: u64 = 3;
 
     // Type that stores the following data for a transaction:
-    // 1. transactionType: type of the transaction. Currently, can only be either deposit, transfer or withdraw
+    // 1. transaction_type: type of the transaction. Currently, can only be either deposit, transfer or withdraw
     // 2. Amount: the COIN amount
-    struct Transaction has store, copy {
-        transactionType: String,
+    struct Transaction has store, copy, drop {
+        transaction_type: String,
         amount: u64,
         to: Option<address>,
         from: Option<address>
 
     }
 
+    #[allow(lint(coin_field))]
     // Type that stores the following data for an account:
     // 1. id: ObjectId of the account
     // 2. create_date: The timestamp of the creation time for the account
@@ -59,7 +63,6 @@ module bank::bank {
     public fun create_bank<COIN>(ctx: &mut TxContext) {
         let id = object::new(ctx);
         let accounts = table::new<address, Account<COIN>>(ctx);
-        // let transactions = table::new<address, vector<Transaction>>(ctx);
         // create and initialize bank with the specified COIN
         transfer::share_object(Bank<COIN> { 
             id, 
@@ -74,6 +77,8 @@ module bank::bank {
         clock: &Clock,
         ctx: &mut TxContext
     ) {
+        // sender must not have an account for the bank
+        assert!(!table::contains<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx)), EAccountExists);
         let account = Account {
             id: object::new(ctx),
             create_date: clock::timestamp_ms(clock),
@@ -83,7 +88,7 @@ module bank::bank {
             transactions: vector::empty<Transaction>()
         };
         // save account to the bank
-        table::add(&mut bank.accounts, tx_context::sender(ctx), account)
+        table::add(&mut bank.accounts, tx_context::sender(ctx), account);
     }
 
 
@@ -93,13 +98,13 @@ module bank::bank {
         clock: &Clock,
         amount: Coin<COIN>,
         ctx: &mut TxContext
-    )
-    {   // sender must have an account for the bank
+    ){   
+        // sender must have an account for the bank
         assert!(table::contains<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx)), ENoAccount);
         let account = table::borrow_mut<address, Account<COIN>>(&mut bank.accounts, tx_context::sender(ctx));
         // create a deposit transaction to store in the transactions vector
         let transaction = Transaction {
-            transactionType: string::utf8(b"deposit"),
+            transaction_type: string::utf8(b"deposit"),
             amount: coin::value(&amount),
             to: none(),
             from: none()
@@ -112,6 +117,7 @@ module bank::bank {
         account.updated_date = clock::timestamp_ms(clock);
         vector::push_back(&mut account.transactions, transaction);
     }
+    
     // Transfer COIN amount between two accounts in a bank
     public fun transfer<COIN>(
         bank: &mut Bank<COIN>,
@@ -128,7 +134,7 @@ module bank::bank {
         sender_account.updated_date = clock::timestamp_ms(clock);
         // create a transfer transaction to store in the transactions vector for both the sender and recipient
         let transaction = Transaction {
-            transactionType: string::utf8(b"transfer"),
+            transaction_type: string::utf8(b"transfer"),
             amount: amount,
             to: some(recipient),
             from: some(tx_context::sender(ctx))
@@ -157,7 +163,7 @@ module bank::bank {
         assert!(coin::value(&account.current_balance) >= amount, EInsufficientBalance);
         // create a transfer transaction to store in the transactions vector for both the sender and recipient
         let transaction = Transaction {
-            transactionType: string::utf8(b"withdraw"),
+            transaction_type: string::utf8(b"withdraw"),
             amount: amount,
             to: none(),
             from: none()
@@ -172,13 +178,37 @@ module bank::bank {
         transfer::public_transfer(transfer_coin, tx_context::sender(ctx));
     }
 
-    // public entry fun view_account<COIN>(bank: &Bank<COIN>, ctx: &mut TxContext): (u64, u64, u64, address, u64){
-    //     let account = table::borrow<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx));
-    //     (account.create_date,account.updated_date,coin::value(&account.current_balance),account.account_address,vector::length(&account.transactions))
-    // }
-    // public fun view_account_transactions<COIN>(bank: &Bank<COIN>, ctx: &mut TxContext): &vector<Transaction>{
-    //     let account = table::borrow<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx));
-    //     &account.transactions
-    // }
+    // Accessor functions
+
+    public fun account_create_date<COIN>(self: &Bank<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        account.create_date
+    }
+    public fun account_updated_date<COIN>(self: &Bank<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        account.updated_date
+    }
+    public fun account_balance<COIN>(self: &Bank<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        coin::value(&account.current_balance)
+    }
+
+    public fun bank_address<COIN>(self: &Bank<COIN>): address{
+        self.bank_address
+    }
+    public fun bank_accounts_length<COIN>(self: &Bank<COIN>): u64{
+        table::length(&self.accounts)
+    }
+
+    public fun view_account_transaction<COIN>(bank: &Bank<COIN>, index: u64, ctx: &mut TxContext): (String, u64, Option<address>,Option<address>){
+        assert!(table::contains<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx));
+        assert!(index < vector::length(&account.transactions),EOutOfBounds);
+        let transaction = vector::borrow(&account.transactions, index);
+        (transaction.transaction_type, transaction.amount, transaction.to, transaction.from)
+    }
 
 }
