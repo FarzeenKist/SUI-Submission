@@ -20,6 +20,8 @@ module bank::bank {
     /// For when someone tries to create more than one account in the same bank
     const EAccountExists: u64 = 3;
 
+    const EInvalid: u64 = 4;
+
     // Type that stores the following data for a transaction:
     // 1. transaction_type: type of the transaction. Currently, can only be either deposit, transfer or withdraw
     // 2. Amount: the COIN amount
@@ -129,6 +131,7 @@ module bank::bank {
     {
         assert!(table::contains<address, Account<COIN>>(&bank.accounts, tx_context::sender(ctx)), ENoAccount);
         assert!(table::contains<address, Account<COIN>>(&bank.accounts, recipient), ENoAccount);
+        assert!(tx_context::sender(ctx) != recipient, EInvalid);
         let sender_account = table::borrow_mut<address, Account<COIN>>(&mut bank.accounts, tx_context::sender(ctx));
         assert!(coin::value(&sender_account.current_balance) >= amount, EInsufficientBalance);
         sender_account.updated_date = clock::timestamp_ms(clock);
